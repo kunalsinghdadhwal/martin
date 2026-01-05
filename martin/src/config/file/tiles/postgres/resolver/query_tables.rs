@@ -1,6 +1,6 @@
 //! `PostgreSQL` table discovery and validation.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use futures::pin_mut;
 use log::{debug, warn};
@@ -24,7 +24,12 @@ const DEFAULT_BUFFER: u32 = 64;
 const DEFAULT_CLIP_GEOM: bool = true;
 
 /// Queries the database for available tables with geometry columns.
-pub async fn query_available_tables(pool: &PostgresPool) -> PostgresResult<SqlTableInfoMapMapMap> {
+///
+/// The reported tables are filtered by the `restrict_to_tables` parameter.
+pub async fn query_available_tables(
+    pool: &PostgresPool,
+    restrict_to_tables: Option<HashSet<(String, String)>>,
+) -> PostgresResult<SqlTableInfoMapMapMap> {
     let rows = pool
         .get()
         .await?
@@ -36,6 +41,16 @@ pub async fn query_available_tables(pool: &PostgresPool) -> PostgresResult<SqlTa
     for row in &rows {
         let schema: String = row.get("schema");
         let table: String = row.get("name");
+
+        // Within the config, if auto_publish is false or omitted, the list of schema and table
+        // names set explicitly under the tables key is provided to the function. As the query above
+        // may return more tables than explicitly defined, these are filtered out below.
+        if let Some(ref table_names) = restrict_to_tables
+            && !table_names.contains(&(schema.to_lowercase(), table.to_lowercase()))
+        {
+            continue;
+        }
+
         let tilejson = if let Some(text) = row.get("description") {
             match serde_json::from_str::<Value>(text) {
                 Ok(v) => Some(v),
@@ -58,7 +73,9 @@ pub async fn query_available_tables(pool: &PostgresPool) -> PostgresResult<SqlTa
             table,
             geometry_column: row.get("geom"),
             geometry_index: row.get("geom_idx"),
-            is_view: row.get("is_view"),
+            relkind: row
+                .get::<_, Option<i8>>("relkind")
+                .and_then(|r| u8::try_from(r).ok().map(char::from)),
             srid: row.get("srid"), // casting i32 to u32?
             geometry_type: row.get("type"),
             properties: Some(serde_json::from_value(row.get("properties")).unwrap()),
@@ -66,9 +83,9 @@ pub async fn query_available_tables(pool: &PostgresPool) -> PostgresResult<SqlTa
             ..Default::default()
         };
 
-        // Warn for missing geometry indices. Ignore views since those can't have indices
-        // and will generally refer to table columns.
-        if let (Some(false), Some(false)) = (info.geometry_index, info.is_view) {
+        // Warn for missing geometry indices.
+        // Ignore views since those can't have indices and will generally refer to table columns.
+        if info.geometry_index == Some(false) && info.relkind != Some('v') {
             warn!(
                 "Table {}.{} has no spatial index on column {}",
                 info.schema, info.table, info.geometry_column

@@ -72,6 +72,19 @@ postgres:
       properties:
         big_feat_id: int8
         id: int4
+    mat_view:
+      schema: public
+      table: mat_view
+      srid: 900913
+      geometry_column: geom
+      bounds:
+      - -0.0010997121 # truncated to 10 digits
+      - 0.0003416246 # truncated to 10 digits
+      - -0.0006641715 # truncated to 10 digits
+      - 0.0003683552 # truncated to 10 digits
+      geometry_type: GEOMETRY
+      properties:
+        id: int4
     points1:
       schema: public
       table: points1
@@ -349,7 +362,3 @@ mbtiles:
     world_cities_diff: tests/fixtures/mbtiles/world_cities_diff.mbtiles
     world_cities_modified: tests/fixtures/mbtiles/world_cities_modified.mbtiles
     zoomed_world_cities: tests/fixtures/mbtiles/zoomed_world_cities.mbtiles
-cog:
-- tests/fixtures/mbtiles
-- tests/fixtures/pmtiles
-- tests/fixtures/pmtiles2
